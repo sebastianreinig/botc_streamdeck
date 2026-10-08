@@ -140,3 +140,5 @@ Der Dienst `botc-deck.service` startet ab sofort automatisch im Hintergrund bei 
 * **Inoffizielles Fan-Projekt**: Dieses Projekt ist ein unabhängiges, nicht-kommerzielles Fan-Tool und steht in **keinerlei** offizieller Verbindung zu Steven Medway oder *The Pandemonium Institute*.
 * **Markenrecht**: *"Blood on the Clocktower"* ist eine eingetragene Marke von Steven Medway und *The Pandemonium Institute*. Alle Rechte an Spielkonzepten, Markennamen und offiziellen Inhalten verbleiben bei den jeweiligen Inhabern.
 * **Open Source Lizenz**: Der Quellcode dieses Projekts steht unter der [MIT License](LICENSE).
+* **Entwicklung mit KI-Unterstützung**: Dieses Projekt wurde mit Unterstützung von **Gemini 3.8 Flash** realisiert.
+
