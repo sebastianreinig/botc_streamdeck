@@ -1,0 +1,6 @@
+# Core dependencies
+streamdeck>=0.9.5
+python-mpv>=1.0.5
+dbus-fast>=2.22.0
+Pillow>=10.0.0
+PyYAML>=6.0.1

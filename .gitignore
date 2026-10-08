@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+
+# Project Runtime State & Caches (Personal & Hardware specific)
+state.json
+*.tmp
+cache_tts/
+*.log
+
+# Audio Files - DO NOT COMMIT COPYRIGHTED AUDIO
+music/*.mp3
+music/*.wav
+music/*.ogg
+music/*.flac
+music/*.m4a
+!music/README.md
+!music/.gitkeep
+
+# Operating System & IDE
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

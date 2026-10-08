@@ -1,0 +1,6 @@
+# udev rules for Elgato Stream Deck devices
+# Allows non-root user access to the USB HID devices
+
+SUBSYSTEM=="input", GROUP="input", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0fd9", MODE="0666", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="0fd9", MODE="0666", TAG+="uaccess"

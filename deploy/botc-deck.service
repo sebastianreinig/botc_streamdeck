@@ -1,0 +1,15 @@
+[Unit]
+Description=Blood on the Clocktower Stream Deck Controller
+After=pipewire.service wireplumber.service bluetooth.target sound.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/botc_streamdeck
+ExecStart=%h/botc_streamdeck/venv/bin/python3 -m botc_deck
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

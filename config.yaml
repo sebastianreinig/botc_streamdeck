@@ -1,0 +1,22 @@
+paths:
+  music_dir: "music"
+  day_track: "music/day.mp3"
+  night_track: "music/night.mp3"
+  bell_sound: "music/bell.mp3"
+  state_file: "state.json"
+  tts_cache_dir: "cache_tts"
+  assets_dir: "assets/icons"
+
+audio:
+  default_volume: 70
+  volume_step: 5
+  fade_duration: 1.5      # Sekunden beim Ein-/Ausblenden zwischen Tag und Nacht
+
+timers:
+  options: [10, 8, 5, 3]  # Minuten
+
+system:
+  disable_wifi_on_start: false  # Auf true setzen, falls WLAN am Pi komplett deaktiviert werden soll (keine BT-Interferenzen)
+  auto_reconnect_bluetooth: true
+  tts_enabled: true
+  brightness_steps: [100, 50, 15]
