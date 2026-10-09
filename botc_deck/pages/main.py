@@ -14,6 +14,7 @@ class MainPage(BasePage):
         self.system_prompt_until = 0
 
     async def get_image(self, key_idx):
+        self.renderer.is_night = (self.state.active_mode == "night")
         r = self.renderer
         now = time.monotonic()
 
@@ -145,23 +146,17 @@ class MainPage(BasePage):
         if key_idx == 0:
             # Night
             await self.audio.play_track("night")
-            await self.app.refresh_key(0)
-            await self.app.refresh_key(1)
-            await self.app.refresh_key(2)
+            await self.app.refresh_page()
 
         elif key_idx == 1:
             # Day
             await self.audio.play_track("day")
-            await self.app.refresh_key(0)
-            await self.app.refresh_key(1)
-            await self.app.refresh_key(2)
+            await self.app.refresh_page()
 
         elif key_idx == 2:
             # Play / Pause
             await self.audio.toggle_play_pause()
-            await self.app.refresh_key(0)
-            await self.app.refresh_key(1)
-            await self.app.refresh_key(2)
+            await self.app.refresh_page()
 
         elif key_idx == 3:
             # Volume Down
@@ -207,9 +202,8 @@ class MainPage(BasePage):
         elif key_idx == 10:
             # Manual Bell (stops music + plays bell)
             await self.audio.play_bell()
-            await self.app.refresh_key(0)
-            await self.app.refresh_key(1)
-            await self.app.refresh_key(2)
+            await self.app.refresh_page()
+
 
         elif key_idx == 11:
             # Quick adjust -30s

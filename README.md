@@ -43,7 +43,9 @@ Designed for screenless, distraction-free tabletop operation—featuring wireles
 ## Features & Highlights
 
 * 🎵 **Day & Night Atmosphere**: Seamless crossfading between day and night phases. Remembers playback position to the second and resumes precisely where you left off when returning to the phase.
+* 🩸 **Atmospheric Night Theme (Grimoire Red)**: When entering the Night phase, all button labels and borders automatically shift to blood red / night-vision crimson with subtle dark wine outlines to preserve night vision and set a grim mood at the table, while reverting to crisp white during the Day.
 * ⏱️ **Timers with Live Countdown**: Preset durations for 10, 8, 5, and 3 minutes. Displays dynamic countdowns (`MM:SS`) directly on the keys, turning orange when `<30s` remain and flashing red alarm when `<10s` remain.
+
 * ⚡ **Quick Adjust (+30s / -30s)**: Need just a bit more town discussion before nominations? Tap `+30s` for an instant 30-second extension (or long-press for +1 minute).
 * 🔔 **Town Bell & Silence**: When the timer expires or when canceled via Stop / Bell, music cuts immediately and `bell.mp3` tolls. Silence follows naturally until the next phase is started.
 * 📶 **Headless Bluetooth (No Monitor Needed)**: Full device discovery and 1-tap pairing handled directly through the Stream Deck keys. Displays discovered speaker names (e.g. SoundCore, JBL) and automatically reconnects on startup.

@@ -12,12 +12,23 @@ async def test_all():
     print("Testing BotCApp initialization...")
     app = BotCApp()
 
-    print("Testing MainPage rendering...")
+    print("Testing MainPage rendering (Day mode)...")
+    app.state.active_mode = "day"
     main_p = MainPage(app)
     for k in range(15):
         img = await main_p.get_image(k)
         assert img.size == (72, 72)
-    print("MainPage: 15 buttons rendered ok.")
+    assert not app.renderer.is_night
+    print("MainPage (Day): 15 buttons rendered ok.")
+
+    print("Testing MainPage rendering (Night mode)...")
+    app.state.active_mode = "night"
+    for k in range(15):
+        img = await main_p.get_image(k)
+        assert img.size == (72, 72)
+    assert app.renderer.is_night
+    print("MainPage (Night): 15 buttons rendered in red theme ok.")
+
 
     print("Testing BluetoothPage rendering...")
     bt_p = BluetoothPage(app)

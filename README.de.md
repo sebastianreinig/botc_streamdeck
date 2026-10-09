@@ -42,7 +42,9 @@ Entwickelt für den screenlosen Standalone-Betrieb am Spieltisch – inklusive d
 ## Highlights
 
 * 🎵 **Tag- & Nacht-Atmosphäre**: Sanfter Wechsel zwischen Tag- und Nachtmusik. Das System merkt sich für Tag und Nacht sekundengenau die Position und setzt die Musik beim Phasenwechsel nahtlos fort.
+* 🩸 **Atmosphärisches Nacht-Theme (Grimoire-Rot)**: Beim Wechsel in die Nacht-Phase schalten alle Tastenbeschriftungen und Umrandungen automatisch auf blutroten Nachtsicht-Modus mit dezentem Weinrot-Rahmen um. Am Tag kehrt alles zu strahlendem Weiß zurück – perfekt für stimmungsvolle Runden im Halbdunkel.
 * ⏱️ **Timer mit Live-Countdown**: 10, 8, 5 und 3 Minuten mit minütlicher/sekundlicher Restzeitanzeige (`MM:SS`) direkt auf der Taste. Farbwarnung bei `<30s` (Orange) und Alarm bei `<10s` (Rot).
+
 * ⚡ **Quick-Adjust (+30s / -30s)**: Mitten in hitzigen Diskussionen mit einem Fingertipp spontan +30 Sekunden Nachspielzeit spendieren (oder lang drücken für +1 Minute).
 * 🔔 **Glocke & Stopp-Automatik**: Timer-Ende, Timer-Abbruch oder Glocken-Taste stoppen die Musik und läuten `bell.mp3`. Danach bleibt es atmosphärisch still, bis die nächste Phase gestartet wird.
 * 📶 **Headless Bluetooth (Ohne Monitor)**: Vollständige Gerätesuche und Kopplung direkt über das Stream Deck. Gefundene Boxen (z. B. Anker SoundCore, JBL) werden namentlich auf den Tasten angezeigt. Automatischer Reconnect beim Einschalten.

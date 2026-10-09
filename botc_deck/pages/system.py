@@ -15,6 +15,7 @@ class SystemPage(BasePage):
         self.shutdown_confirm_until = 0
 
     async def get_image(self, key_idx):
+        self.renderer.is_night = (self.state.active_mode == "night")
         r = self.renderer
         now = time.monotonic()
 

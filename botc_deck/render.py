@@ -8,9 +8,16 @@ KEY_SIZE = (72, 72)
 # Color Palette (BotC Dark Gothic)
 COLOR_BG_DEFAULT = (20, 22, 30)
 COLOR_BG_ACTIVE = (35, 40, 58)
+
+# Day Theme (Standard)
 COLOR_BORDER_DEFAULT = (45, 52, 70)
 COLOR_TEXT_PRIMARY = (240, 240, 245)
 COLOR_TEXT_MUTED = (160, 165, 180)
+
+# Night Theme (Grimoire Blood Red / Dark Wine)
+COLOR_BORDER_NIGHT = (65, 22, 28)           # Subtle Dark Wine Red
+COLOR_TEXT_NIGHT = (245, 65, 65)             # Vivid Blood Red / Night Vision
+COLOR_TEXT_NIGHT_MUTED = (175, 75, 75)       # Muted Crimson
 
 # Specialized Colors
 COLOR_NIGHT = (108, 92, 231)       # Violet / Night
@@ -27,7 +34,9 @@ class ButtonRenderer:
     def __init__(self, assets_dir=None):
         self.assets_dir = Path(assets_dir) if assets_dir else Path("assets/icons")
         self.icon_cache = {}
+        self.is_night = False
         self._load_fonts()
+
 
     def _load_fonts(self):
         # Try loading high quality TrueType fonts commonly found on Linux / macOS
@@ -85,19 +94,31 @@ class ButtonRenderer:
         sublabel=None,
         icon_name=None,
         bg_color=COLOR_BG_DEFAULT,
-        border_color=COLOR_BORDER_DEFAULT,
+        border_color=None,
         border_width=2,
         is_active=False,
         highlight_color=None,
         custom_icon_img=None,
+        is_night=None,
     ):
         """Render a single 72x72 Stream Deck button image."""
+        night_mode = self.is_night if is_night is None else is_night
+
+        # Determine effective border and text colors based on theme
+        if border_color is None:
+            effective_border = COLOR_BORDER_NIGHT if night_mode else COLOR_BORDER_DEFAULT
+        else:
+            effective_border = border_color
+
+        default_text_color = COLOR_TEXT_NIGHT if night_mode else COLOR_TEXT_PRIMARY
+        default_muted_color = COLOR_TEXT_NIGHT_MUTED if night_mode else COLOR_TEXT_MUTED
+
         img = Image.new("RGBA", KEY_SIZE, bg_color)
         draw = ImageDraw.Draw(img)
 
         # Background accent if active
         if is_active and highlight_color:
-            border_color = highlight_color
+            effective_border = highlight_color
             border_width = 3
             # Subtle gradient or inner fill tint
             inner_box = [(4, 4), (KEY_SIZE[0] - 5, KEY_SIZE[1] - 5)]
@@ -105,7 +126,7 @@ class ButtonRenderer:
 
         # Rounded border
         box = [(1, 1), (KEY_SIZE[0] - 2, KEY_SIZE[1] - 2)]
-        draw.rounded_rectangle(box, radius=9, outline=border_color, width=border_width)
+        draw.rounded_rectangle(box, radius=9, outline=effective_border, width=border_width)
 
         # Place icon if available
         icon = custom_icon_img or self.load_icon(icon_name)
@@ -128,7 +149,7 @@ class ButtonRenderer:
             else:
                 text_y = (KEY_SIZE[1] - (bbox[3] - bbox[1])) // 2 if not sublabel else 18
 
-            color = highlight_color if is_active and highlight_color else COLOR_TEXT_PRIMARY
+            color = highlight_color if is_active and highlight_color else default_text_color
             draw.text((text_x, text_y), label, font=font, fill=color)
 
         if sublabel:
@@ -136,16 +157,17 @@ class ButtonRenderer:
             sub_w = bbox_sub[2] - bbox_sub[0]
             sub_x = (KEY_SIZE[0] - sub_w) // 2
             sub_y = KEY_SIZE[1] - 13
-            draw.text((sub_x, sub_y), sublabel, font=self.font_small, fill=COLOR_TEXT_MUTED)
+            draw.text((sub_x, sub_y), sublabel, font=self.font_small, fill=default_muted_color)
 
         return img.convert("RGB")
 
-    def render_timer_button(self, label, remaining_str=None, is_active=False, is_warning=False, is_alert=False):
+    def render_timer_button(self, label, remaining_str=None, is_active=False, is_warning=False, is_alert=False, is_night=None):
         """Render a dedicated countdown timer button with live ticking text."""
+        night_mode = self.is_night if is_night is None else is_night
         bg = COLOR_BG_DEFAULT
-        border = COLOR_BORDER_DEFAULT
+        border = COLOR_BORDER_NIGHT if night_mode else COLOR_BORDER_DEFAULT
         border_w = 2
-        text_color = COLOR_TEXT_PRIMARY
+        text_color = COLOR_TEXT_NIGHT if night_mode else COLOR_TEXT_PRIMARY
 
         if is_active:
             if is_alert:
@@ -179,7 +201,8 @@ class ButtonRenderer:
             # Sublabel: e.g. "10 Min"
             sub_bbox = draw.textbbox((0, 0), label, font=self.font_small)
             sx = (KEY_SIZE[0] - (sub_bbox[2] - sub_bbox[0])) // 2
-            draw.text((sx, KEY_SIZE[1] - 15), label, font=self.font_small, fill=COLOR_TEXT_MUTED)
+            sub_color = COLOR_TEXT_NIGHT_MUTED if night_mode else COLOR_TEXT_MUTED
+            draw.text((sx, KEY_SIZE[1] - 15), label, font=self.font_small, fill=sub_color)
         else:
             # Normal inactive view
             icon = self.load_icon("timer", size=(30, 30))
@@ -187,6 +210,6 @@ class ButtonRenderer:
                 img.alpha_composite(icon, ((KEY_SIZE[0] - 30) // 2, 8))
             bbox = draw.textbbox((0, 0), label, font=self.font_medium)
             tx = (KEY_SIZE[0] - (bbox[2] - bbox[0])) // 2
-            draw.text((tx, KEY_SIZE[1] - 22), label, font=self.font_medium, fill=COLOR_TEXT_PRIMARY)
+            draw.text((tx, KEY_SIZE[1] - 22), label, font=self.font_medium, fill=text_color)
 
         return img.convert("RGB")
