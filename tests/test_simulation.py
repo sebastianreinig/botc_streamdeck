@@ -57,10 +57,13 @@ async def test_all():
 
     print("Testing State Save / Restore...")
     app.state.day_position = 123.4
+    app.state.active_mode = "day"
     app.state.save()
     app.state.load()
     assert abs(app.state.day_position - 123.4) < 0.01
+    assert app.state.active_mode == "day"
     print("State persistence ok.")
+
 
     print("All simulation tests passed successfully!")
 

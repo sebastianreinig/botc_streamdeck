@@ -11,8 +11,9 @@ class State:
         self.brightness_idx = 0
         self.last_bt_device_mac = None
         self.last_bt_device_name = None
-        self.active_mode = None  # "day", "night", or None
+        self.active_mode = "day"  # Default is "day" (clean white text)
         self.load()
+
 
     def load(self):
         if self.path.exists():
@@ -25,8 +26,10 @@ class State:
                     self.brightness_idx = int(data.get("brightness_idx", 0))
                     self.last_bt_device_mac = data.get("last_bt_device_mac")
                     self.last_bt_device_name = data.get("last_bt_device_name")
-                    self.active_mode = data.get("active_mode")
+                    # Game session always starts fresh in Day mode (white text)
+                    self.active_mode = "day"
             except Exception as e:
+
                 print(f"[State] Error loading state: {e}")
 
     def save(self):
