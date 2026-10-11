@@ -721,33 +721,66 @@ class BluetoothManager:
         if not self.is_linux:
             return
         mac_clean = mac.replace(":", "_").lower()
-        # Retry for up to 3 seconds as WirePlumber initializes the A2DP profile
+        has_pactl = shutil.which("pactl") is not None
+        has_wpctl = shutil.which("wpctl") is not None
+
         for _ in range(6):
             await asyncio.sleep(0.5)
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "pactl", "list", "sinks", "short",
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.DEVNULL
-                )
-                stdout, _ = await proc.communicate()
-                lines = stdout.decode("utf-8", errors="ignore").splitlines()
-                for line in lines:
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        sink_name = parts[1]
-                        if "bluez" in sink_name.lower() or mac_clean in sink_name.lower():
-                            print(f"[Bluetooth] Found Bluetooth audio sink: {sink_name}. Setting as default output.")
-                            await asyncio.create_subprocess_exec(
-                                "pactl", "set-default-sink", sink_name,
-                                stdout=asyncio.subprocess.DEVNULL,
-                                stderr=asyncio.subprocess.DEVNULL
-                            )
-                            await asyncio.create_subprocess_exec(
-                                "pactl", "set-sink-mute", sink_name, "0",
-                                stdout=asyncio.subprocess.DEVNULL,
-                                stderr=asyncio.subprocess.DEVNULL
-                            )
-                            return
-            except Exception as e:
-                print(f"[Bluetooth] Error setting default sink: {e}")
+            # 1. Try native PipeWire/WirePlumber wpctl
+            if has_wpctl:
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "wpctl", "status",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL
+                    )
+                    stdout, _ = await proc.communicate()
+                    out = stdout.decode("utf-8", errors="ignore")
+                    in_sinks = False
+                    for line in out.splitlines():
+                        if "Sinks:" in line:
+                            in_sinks = True
+                            continue
+                        elif in_sinks and ("Sources:" in line or "Filters:" in line or "Streams:" in line):
+                            in_sinks = False
+                            break
+                        if in_sinks:
+                            m_sink = re.search(r"(\d+)\.\s+(.*)", line)
+                            if m_sink:
+                                sink_id = m_sink.group(1)
+                                sink_name = m_sink.group(2).lower()
+                                if any(k in sink_name for k in ("bluez", "sound", "logitech", "speaker", "headset", "audio")):
+                                    if "built-in" not in sink_name:
+                                        print(f"[Bluetooth] Setting default sink via wpctl to ID {sink_id} ({sink_name})...")
+                                        await asyncio.create_subprocess_exec(
+                                            "wpctl", "set-default", sink_id,
+                                            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                                        )
+                                        return
+                except Exception as e:
+                    print(f"[Bluetooth] wpctl error: {e}")
+
+            # 2. Try pactl fallback if installed
+            if has_pactl:
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "pactl", "list", "sinks", "short",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL
+                    )
+                    stdout, _ = await proc.communicate()
+                    lines = stdout.decode("utf-8", errors="ignore").splitlines()
+                    for line in lines:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            sink_name = parts[1]
+                            if "bluez" in sink_name.lower() or mac_clean in sink_name.lower():
+                                print(f"[Bluetooth] Found Bluetooth audio sink: {sink_name}. Setting as default output.")
+                                await asyncio.create_subprocess_exec(
+                                    "pactl", "set-default-sink", sink_name,
+                                    stdout=asyncio.subprocess.DEVNULL,
+                                    stderr=asyncio.subprocess.DEVNULL
+                                )
+                                return
+                except Exception as e:
+                    print(f"[Bluetooth] pactl error: {e}")
