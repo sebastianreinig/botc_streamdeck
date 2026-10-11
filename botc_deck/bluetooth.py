@@ -33,16 +33,23 @@ class BluetoothManager:
             self.last_mac = None
             self.last_name = None
 
+    async def _unblock_rfkill(self):
+        """Unblock bluetooth via rfkill if the binary is present (handles /usr/sbin/rfkill)."""
+        rfkill_bin = shutil.which("rfkill") or ("/usr/sbin/rfkill" if os.path.exists("/usr/sbin/rfkill") else None)
+        if rfkill_bin:
+            try:
+                p = await asyncio.create_subprocess_exec(
+                    rfkill_bin, "unblock", "bluetooth",
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+                await asyncio.wait_for(p.wait(), timeout=1.5)
+            except Exception:
+                pass
+
     async def start(self):
         """Initial check and auto-reconnect."""
         if self.is_linux:
-            try:
-                await asyncio.create_subprocess_exec(
-                    "rfkill", "unblock", "bluetooth",
-                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                )
-            except Exception:
-                pass
+            await self._unblock_rfkill()
             # Prioritize USB Bluetooth dongle over onboard Pi radio
             await self._ensure_preferred_controller()
             # Check currently connected device
@@ -193,10 +200,7 @@ class BluetoothManager:
         # Linux / BlueZ scan
         try:
             # 0. Ensure Bluetooth adapter is unblocked and preferred USB controller is active
-            await asyncio.create_subprocess_exec(
-                "rfkill", "unblock", "bluetooth",
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-            )
+            await self._unblock_rfkill()
             await self._ensure_preferred_controller()
             await asyncio.create_subprocess_exec(
                 "bluetoothctl", "power", "on",
@@ -576,10 +580,7 @@ class BluetoothManager:
 
             # 3. Unblock rfkill and power on
             try:
-                await asyncio.create_subprocess_exec(
-                    "rfkill", "unblock", "bluetooth",
-                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                )
+                await self._unblock_rfkill()
                 p_on = await asyncio.create_subprocess_exec(
                     "bluetoothctl", "power", "on",
                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
