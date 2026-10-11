@@ -44,6 +44,14 @@ async def test_all():
         assert img.size == (72, 72)
     print("SystemPage: 15 buttons rendered ok.")
 
+    print("Testing Bluetooth Reset logic...")
+    await app.bluetooth.reset_bluetooth()
+    assert not app.bluetooth.is_scanning
+    assert not app.bluetooth.is_connecting
+    assert app.bluetooth.connected_device is None
+    print("Bluetooth Reset logic ok.")
+
+
     print("Testing Timer Logic...")
     app.timers.start_timer(1)
     assert app.timers.is_running

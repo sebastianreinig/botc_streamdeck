@@ -186,9 +186,10 @@ You never need an external monitor or keyboard. Pairing is performed **entirely 
 ├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
 │ [5] Music    │  [6] Audio   │ [7] IP Addr  │  [8] App Rst │ [9] Power Off│
 │ (Reset 0:00) │  (Restart)   │ (TTS Speak)  │  (Restart)   │ (Tap 2x)     │
-├──────────────┴──────────────┴──────────────┴──────────────┴──────────────┤
-│                             [10-14] Unused                               │
-└──────────────────────────────────────────────────────────────────────────┘
+├──────────────┼──────────────┴──────────────┴──────────────┴──────────────┤
+│ [10] BT Reset│                       [11-14] Unused                      │
+│  (Restart)   │                                                           │
+└──────────────┴───────────────────────────────────────────────────────────┘
 ```
 
 - **← Back**: Returns to the main page.
@@ -201,6 +202,8 @@ You never need an external monitor or keyboard. Pairing is performed **entirely 
 - **ℹ️ IP Address**: Speaks the current local IP address aloud.
 - **🔁 App Restart**: Restarts the controller Python process.
 - **⏻ Power Off (Tap 2x)**: Instantly blanks Stream Deck displays and executes a safe system shutdown.
+- **📶 BT Reset**: Power cycles the Bluetooth chip and resets the audio stack if connections ever hang.
+
 
 ---
 

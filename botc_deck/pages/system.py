@@ -133,9 +133,19 @@ class SystemPage(BasePage):
                 highlight_color=COLOR_CANCEL
             )
 
+        elif key_idx == 10:
+            # Bluetooth Subsystem Reset
+            return r.render_button(
+                label="BT Reset",
+                sublabel="Neustart",
+                icon_name="bluetooth",
+                border_color=COLOR_BT_WAIT
+            )
+
         return r.render_button(label="")
 
     async def on_press(self, key_idx):
+
         now = time.monotonic()
 
         if key_idx == 0:
@@ -232,6 +242,13 @@ class SystemPage(BasePage):
             else:
                 self.shutdown_confirm_until = now + 3.5
                 await self.app.refresh_key(9)
+
+        elif key_idx == 10:
+            # Bluetooth Subsystem Reset
+            print("[System] User requested Bluetooth reset...")
+            await self.bluetooth.reset_bluetooth()
+            await self.app.refresh_page()
+
 
 
 

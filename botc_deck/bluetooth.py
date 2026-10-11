@@ -241,13 +241,8 @@ class BluetoothManager:
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL
             )
-            # 2. Pair (if not already paired)
-            p_pair = await asyncio.create_subprocess_exec(
-                "bluetoothctl", "pair", mac,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await p_pair.communicate()
+            # 2. Pair with automated PIN 0000 / confirmation support
+            await self._pair_with_pin_support(mac)
 
             # 3. Connect
             p_conn = await asyncio.create_subprocess_exec(
@@ -255,6 +250,7 @@ class BluetoothManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
+
             stdout, _ = await p_conn.communicate()
             out = stdout.decode("utf-8", errors="ignore")
 
@@ -340,7 +336,152 @@ class BluetoothManager:
             if self.tts:
                 await self.tts.speak("Gerät vergessen.")
 
+    async def _pair_with_pin_support(self, mac, timeout=12.0):
+        """
+        Pairs with device using an interactive session that automatically provides
+        PIN '0000' or passes authorization if requested by legacy Bluetooth adapters.
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "bluetoothctl",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            # Register agent and issue pair command
+            commands = f"agent on\ndefault-agent\npair {mac}\n"
+            proc.stdin.write(commands.encode("utf-8"))
+            await proc.stdin.drain()
+
+            loop = asyncio.get_running_loop()
+            start_t = loop.time()
+
+            while loop.time() - start_t < timeout:
+                try:
+                    line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
+                    if not line_bytes:
+                        break
+                    line = line_bytes.decode("utf-8", errors="ignore")
+                    line_lower = line.lower()
+
+                    if "enter pin code" in line_lower or "pin code:" in line_lower:
+                        print(f"[Bluetooth] Device {mac} requested PIN. Sending '0000'...")
+                        proc.stdin.write(b"0000\n")
+                        await proc.stdin.drain()
+
+                    elif "confirm passkey" in line_lower or "authorize" in line_lower or "(yes/no)" in line_lower:
+                        print(f"[Bluetooth] Device {mac} requested confirmation. Sending 'yes'...")
+                        proc.stdin.write(b"yes\n")
+                        await proc.stdin.drain()
+
+                    elif "pairing successful" in line_lower or "already paired" in line_lower:
+                        print(f"[Bluetooth] Pairing successful for {mac}.")
+                        break
+
+                    elif "failed to pair" in line_lower:
+                        print(f"[Bluetooth] Pairing note: {line.strip()}")
+                        break
+                except asyncio.TimeoutError:
+                    pass
+
+            try:
+                proc.stdin.write(b"quit\n")
+                await proc.stdin.drain()
+                proc.stdin.close()
+                await proc.wait()
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[Bluetooth] Pair with PIN error: {e}")
+
+    async def reset_bluetooth(self):
+        """
+        Hard reset of the Bluetooth subsystem:
+        1. Cancels active scans and reconnection tasks.
+        2. Disconnects active connections.
+        3. Power cycles the Bluetooth chip (power off -> sleep -> power on).
+        4. Re-registers default BlueZ agent.
+        5. Restarts WirePlumber user audio daemon.
+        """
+        print("[Bluetooth] Starting Bluetooth subsystem reset...")
+        self.is_scanning = False
+        self.is_connecting = False
+        self.discovered_devices = []
+
+        if not self.is_linux:
+            self.connected_device = None
+            if self.tts:
+                await self.tts.speak("Bluetooth zurückgesetzt.")
+            return
+
+        try:
+            # 1. Disconnect any active connection
+            if self.connected_device or self.last_mac:
+                target = self.connected_device["mac"] if self.connected_device else self.last_mac
+                try:
+                    p = await asyncio.create_subprocess_exec(
+                        "bluetoothctl", "disconnect", target,
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                    )
+                    await asyncio.wait_for(p.wait(), timeout=2.0)
+                except Exception:
+                    pass
+            self.connected_device = None
+
+            # 2. Power off Bluetooth controller
+            try:
+                p_off = await asyncio.create_subprocess_exec(
+                    "bluetoothctl", "power", "off",
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+                await asyncio.wait_for(p_off.wait(), timeout=3.0)
+            except Exception:
+                pass
+
+            await asyncio.sleep(1.0)
+
+            # 3. Unblock rfkill and power on
+            try:
+                await asyncio.create_subprocess_exec(
+                    "rfkill", "unblock", "bluetooth",
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+                p_on = await asyncio.create_subprocess_exec(
+                    "bluetoothctl", "power", "on",
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+                await asyncio.wait_for(p_on.wait(), timeout=3.0)
+                await asyncio.create_subprocess_exec(
+                    "bluetoothctl", "default-agent",
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+            except Exception:
+                pass
+
+            # 4. Restart WirePlumber audio daemon if running
+            try:
+                p_wp = await asyncio.create_subprocess_exec(
+                    "systemctl", "--user", "restart", "wireplumber",
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+                await asyncio.wait_for(p_wp.wait(), timeout=3.0)
+            except Exception:
+                pass
+
+            print("[Bluetooth] Bluetooth reset completed successfully.")
+            if self.tts:
+                await self.tts.speak("Bluetooth zurückgesetzt.")
+        except Exception as e:
+            print(f"[Bluetooth] Error during Bluetooth reset: {e}")
+            if self.tts:
+                await self.tts.speak("Bluetooth Reset fehlgeschlagen.")
+
     def _is_valid_device_name(self, name, mac):
+
         if not name:
             return False
         clean = name.strip()

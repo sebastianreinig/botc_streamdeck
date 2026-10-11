@@ -184,9 +184,10 @@ Du benötigst weder Monitor noch Tastatur. Die Bluetooth-Kopplung erfolgt **dire
 ├──────────────┼──────────────┼──────────────┼──────────────┼──────────────┤
 │ [5] Musik    │  [6] Audio   │ [7] IP-Adr.  │  [8] App Neu │ [9] Power Off│
 │ (Reset 0:00) │  (Neustart)  │   (Ansage)   │  (Neustart)  │ (2x drücken) │
-├──────────────┴──────────────┴──────────────┴──────────────┴──────────────┤
-│                             [10-14] Frei                                 │
-└──────────────────────────────────────────────────────────────────────────┘
+├──────────────┼──────────────┴──────────────┴──────────────┴──────────────┤
+│ [10] BT Reset│                       [11-14] Frei                        │
+│  (Neustart)  │                                                           │
+└──────────────┴───────────────────────────────────────────────────────────┘
 ```
 - **← Zurück**: Kehrt zur Hauptseite zurück.
 - **📶 Bluetooth**: Zeigt Status & öffnet das Kopplungsmenü (geschützt vor Fehlbedienung).
@@ -198,6 +199,8 @@ Du benötigst weder Monitor noch Tastatur. Die Bluetooth-Kopplung erfolgt **dire
 - **ℹ️ IP-Adresse**: Sagt die aktuelle IP-Adresse per Sprache an.
 - **🔁 App Neu**: Startet die Steuerungs-App neu.
 - **⏻ Power Off (2× drücken)**: Dunkelt das Stream Deck sofort ab und fährt den Pi sauber herunter.
+- **📶 BT Reset**: Startet den Bluetooth-Funkchip und den Audio-Dienst bei Verbindungshängern komplett neu.
+
 
 ---
 
