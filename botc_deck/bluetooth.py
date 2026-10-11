@@ -123,6 +123,15 @@ class BluetoothManager:
                 "bluetoothctl", "default-agent",
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
             )
+            # Ensure any previous scan is stopped so discovery is not busy
+            try:
+                p_soff = await asyncio.create_subprocess_exec(
+                    "bluetoothctl", "scan", "off",
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+                await asyncio.wait_for(p_soff.wait(), timeout=1.5)
+            except Exception:
+                pass
 
             # Interactive scan session to capture newly broadcasted devices
             proc = await asyncio.create_subprocess_exec(
@@ -144,7 +153,8 @@ class BluetoothManager:
                     line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
                     if not line_bytes:
                         break
-                    line = line_bytes.decode("utf-8", errors="ignore").strip()
+                    raw_line = line_bytes.decode("utf-8", errors="ignore")
+                    line = self._clean_bt_str(raw_line)
 
                     # 1. Matches Name or Alias change: "[CHG] Device AA:BB:CC:DD:EE:FF Name: MySpeaker"
                     m_name = re.search(r"Device\s+([0-9A-Fa-f:]{17})\s+(?:Name|Alias):\s*(.+)$", line)
@@ -155,10 +165,12 @@ class BluetoothManager:
                             continue
 
                     # 2. Matches new broadcast: "[NEW] Device AA:BB:CC:DD:EE:FF MySpeaker"
-                    m_new = re.search(r"\[NEW\]\s+Device\s+([0-9A-Fa-f:]{17})\s+(.+)$", line)
+                    m_new = re.search(r"Device\s+([0-9A-Fa-f:]{17})\s+(.+)$", line)
                     if m_new:
                         mac, name = m_new.group(1), m_new.group(2).strip()
                         if self._is_valid_device_name(name, mac):
+                            dev_map[mac] = name
+                        elif mac not in dev_map:
                             dev_map[mac] = name
                 except asyncio.TimeoutError:
                     pass
@@ -174,27 +186,36 @@ class BluetoothManager:
                 except Exception:
                     pass
 
-            # Also query all known devices from BlueZ cache
-            p2 = await asyncio.create_subprocess_exec(
-                "bluetoothctl", "devices",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout2, _ = await p2.communicate()
-            lines = stdout2.decode("utf-8", errors="ignore").splitlines()
+            # Also query all known and paired devices from BlueZ cache
+            for cmd in (["bluetoothctl", "devices"], ["bluetoothctl", "devices", "Paired"]):
+                try:
+                    p2 = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout2, _ = await p2.communicate()
+                    lines = stdout2.decode("utf-8", errors="ignore").splitlines()
+                    for l in lines:
+                        clean_l = self._clean_bt_str(l)
+                        m = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s*(.*)$", clean_l)
+                        if m:
+                            mac, name = m.group(1), m.group(2).strip()
+                            if self._is_valid_device_name(name, mac):
+                                dev_map[mac] = name
+                            elif mac not in dev_map:
+                                dev_map[mac] = name or "Audio"
+                except Exception:
+                    pass
 
-            for line in lines:
-                m = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s+(.*)$", line.strip())
-                if m:
-                    mac, name = m.group(1), m.group(2).strip()
-                    if self._is_valid_device_name(name, mac):
-                        dev_map[mac] = name
-
-            # Prioritize devices by checking if they are audio sinks
+            # Prioritize devices by checking if they are audio sinks and resolve names
             scored_devices = []
             for mac, name in dev_map.items():
-                is_audio = await self._check_is_audio_device(mac)
-                scored_devices.append({"mac": mac, "name": name, "is_audio": is_audio})
+                is_audio, real_name = await self._check_is_audio_device(mac)
+                final_name = real_name or name
+                if not self._is_valid_device_name(final_name, mac):
+                    final_name = "Audio Gerät" if is_audio else final_name
+                scored_devices.append({"mac": mac, "name": final_name, "is_audio": is_audio})
 
             # Sort: audio devices first!
             scored_devices.sort(key=lambda d: 0 if d["is_audio"] else 1)
@@ -494,11 +515,16 @@ class BluetoothManager:
             if self.tts:
                 await self.tts.speak("Bluetooth Reset fehlgeschlagen.")
 
-    def _is_valid_device_name(self, name, mac):
+    def _clean_bt_str(self, text):
+        """Strip ANSI escape sequences and whitespace."""
+        if not text:
+            return ""
+        return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text).strip()
 
+    def _is_valid_device_name(self, name, mac):
         if not name:
             return False
-        clean = name.strip()
+        clean = self._clean_bt_str(name)
         clean_lower = clean.lower()
 
         ignored_prefixes = (
@@ -518,9 +544,9 @@ class BluetoothManager:
         return True
 
     async def _check_is_audio_device(self, mac):
-        """Check whether the device supports Bluetooth audio (A2DP / Sink / Headset)."""
+        """Check whether the device supports Bluetooth audio (A2DP / Sink / Headset) and extract name."""
         if not self.is_linux:
-            return True
+            return True, None
         try:
             proc = await asyncio.create_subprocess_exec(
                 "bluetoothctl", "info", mac,
@@ -528,20 +554,30 @@ class BluetoothManager:
                 stderr=asyncio.subprocess.DEVNULL
             )
             stdout, _ = await proc.communicate()
-            out = stdout.decode("utf-8", errors="ignore").lower()
+            out = self._clean_bt_str(stdout.decode("utf-8", errors="ignore"))
+            out_lower = out.lower()
+
+            resolved_name = None
+            m_name = re.search(r"^\s*(?:Name|Alias):\s*(.+)$", out, re.M)
+            if m_name:
+                cand = m_name.group(1).strip()
+                if self._is_valid_device_name(cand, mac):
+                    resolved_name = cand
+
             # Audio indicators in BlueZ info
             audio_markers = [
                 "audio", "sound", "headset", "speaker", "soundlink", "charge", "flip",
                 "0000110b", "0000110d", "0000110a", "0000111e"
             ]
             for marker in audio_markers:
-                if marker in out:
-                    return True
-            if "icon: audio" in out:
-                return True
+                if marker in out_lower:
+                    return True, resolved_name
+            if "icon: audio" in out_lower:
+                return True, resolved_name
+            return False, resolved_name
         except Exception:
             pass
-        return False
+        return False, None
 
     async def _set_bluetooth_as_default_sink(self, mac):
         """Find the PipeWire/Pulse sink corresponding to the BT device and set it as default."""
