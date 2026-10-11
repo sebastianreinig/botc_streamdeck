@@ -35,14 +35,29 @@ async def test_all():
     for k in range(15):
         img = await bt_p.get_image(k)
         assert img.size == (72, 72)
-    print("BluetoothPage: 15 buttons rendered ok.")
+
+    # Test connecting visual state
+    app.bluetooth.is_connecting = True
+    app.bluetooth.connecting_mac = "11:22:33:44:55:66"
+    app.bluetooth.connecting_name = "SoundCore"
+    for k in range(15):
+        img = await bt_p.get_image(k)
+        assert img.size == (72, 72)
+    app.bluetooth.is_connecting = False
+    app.bluetooth.connecting_mac = None
+    app.bluetooth.connecting_name = None
+    print("BluetoothPage: 15 buttons rendered ok (including connecting feedback).")
 
     print("Testing SystemPage rendering...")
     sys_p = SystemPage(app)
     for k in range(15):
         img = await sys_p.get_image(k)
         assert img.size == (72, 72)
-    print("SystemPage: 15 buttons rendered ok.")
+    sys_p.is_resetting_bt = True
+    img_reset = await sys_p.get_image(10)
+    assert img_reset.size == (72, 72)
+    sys_p.is_resetting_bt = False
+    print("SystemPage: 15 buttons rendered ok (including reset feedback).")
 
     print("Testing Bluetooth Reset logic...")
     await app.bluetooth.reset_bluetooth()

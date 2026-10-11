@@ -42,6 +42,16 @@ class BluetoothPage(BasePage):
             # Reconnect Last
             has_last = bool(bt.last_mac)
             sub = bt.last_name[:8] if (has_last and bt.last_name) else "Keins"
+            is_connecting_last = bt.is_connecting and (bt.connecting_mac == bt.last_mac or not bt.connecting_mac)
+            if is_connecting_last:
+                return r.render_button(
+                    label="Verbinde…",
+                    sublabel=sub,
+                    icon_name="bluetooth",
+                    is_active=True,
+                    highlight_color=COLOR_BT_WAIT,
+                    border_color=COLOR_BT_WAIT
+                )
             return r.render_button(
                 label="Letztes",
                 sublabel=sub,
@@ -73,6 +83,7 @@ class BluetoothPage(BasePage):
             name = dev.get("name", "Audio")
             mac = dev.get("mac", "")
             is_this_connected = (bt.connected_device and bt.connected_device.get("mac") == mac)
+            is_this_connecting = (bt.is_connecting and bt.connecting_mac == mac)
 
             # Name abbreviation to fit key nicely
             short_name = (name[:9] + "…") if len(name) > 10 else name
@@ -86,6 +97,15 @@ class BluetoothPage(BasePage):
                     is_active=True,
                     highlight_color=COLOR_BT_OK
                 )
+            elif is_this_connecting:
+                return r.render_button(
+                    label=short_name,
+                    sublabel="Verbinde…",
+                    icon_name="bluetooth",
+                    is_active=True,
+                    highlight_color=COLOR_BT_WAIT,
+                    border_color=COLOR_BT_WAIT
+                )
             else:
                 return r.render_button(
                     label=short_name,
@@ -97,6 +117,17 @@ class BluetoothPage(BasePage):
 
         if key_idx == 14:
             # Empty / status slot
+            if bt.is_connecting:
+                curr = bt.connecting_name or "Verbindet…"
+                short_curr = (curr[:7] + "…") if len(curr) > 8 else curr
+                return r.render_button(
+                    label="Status",
+                    sublabel="Verbinde…",
+                    icon_name="bluetooth",
+                    is_active=True,
+                    highlight_color=COLOR_BT_WAIT,
+                    border_color=COLOR_BT_WAIT
+                )
             curr = bt.connected_device.get("name", "Keins") if bt.connected_device else "Getrennt"
             short_curr = (curr[:7] + "…") if len(curr) > 8 else curr
             return r.render_button(label="Status", sublabel=short_curr, icon_name="bluetooth")
@@ -113,14 +144,19 @@ class BluetoothPage(BasePage):
             await self.app.set_page(MainPage(self.app))
 
         elif key_idx == 1:
-            # Start Scan
+            # Start Scan - instant visual cue
+            self.bluetooth.is_scanning = True
             await self.app.refresh_key(1)
             # Run scan asynchronously
             asyncio.create_task(self._do_scan())
 
         elif key_idx == 2:
-            # Reconnect Last
+            # Reconnect Last - instant visual cue
             if bt.last_mac:
+                bt.is_connecting = True
+                bt.connecting_mac = bt.last_mac
+                bt.connecting_name = bt.last_name
+                await self.app.refresh_page()
                 asyncio.create_task(self._do_connect(bt.last_mac, bt.last_name))
 
         elif key_idx == 3:
@@ -139,6 +175,10 @@ class BluetoothPage(BasePage):
                 dev = self.device_slots[slot_idx]
                 mac = dev.get("mac")
                 name = dev.get("name")
+                bt.is_connecting = True
+                bt.connecting_mac = mac
+                bt.connecting_name = name
+                await self.app.refresh_page()
                 asyncio.create_task(self._do_connect(mac, name))
 
     async def _do_scan(self):
@@ -147,6 +187,5 @@ class BluetoothPage(BasePage):
         await self.app.refresh_page()
 
     async def _do_connect(self, mac, name):
-        await self.app.refresh_page()
         success = await self.bluetooth.connect_device(mac, name)
         await self.app.refresh_page()

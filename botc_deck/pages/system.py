@@ -13,6 +13,7 @@ class SystemPage(BasePage):
     def __init__(self, app):
         super().__init__(app)
         self.shutdown_confirm_until = 0
+        self.is_resetting_bt = False
 
     async def get_image(self, key_idx):
         self.renderer.is_night = (self.state.active_mode == "night")
@@ -135,6 +136,15 @@ class SystemPage(BasePage):
 
         elif key_idx == 10:
             # Bluetooth Subsystem Reset
+            if self.is_resetting_bt:
+                return r.render_button(
+                    label="BT Reset",
+                    sublabel="Läuft…",
+                    icon_name="bluetooth",
+                    is_active=True,
+                    highlight_color=COLOR_BT_WAIT,
+                    border_color=COLOR_BT_WAIT
+                )
             return r.render_button(
                 label="BT Reset",
                 sublabel="Neustart",
@@ -246,7 +256,12 @@ class SystemPage(BasePage):
         elif key_idx == 10:
             # Bluetooth Subsystem Reset
             print("[System] User requested Bluetooth reset...")
-            await self.bluetooth.reset_bluetooth()
+            self.is_resetting_bt = True
+            await self.app.refresh_key(10)
+            try:
+                await self.bluetooth.reset_bluetooth()
+            finally:
+                self.is_resetting_bt = False
             await self.app.refresh_page()
 
 

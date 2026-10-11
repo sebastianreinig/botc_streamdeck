@@ -19,6 +19,8 @@ class BluetoothManager:
         self.is_linux = platform.system() == "Linux"
         self.is_scanning = False
         self.is_connecting = False
+        self.connecting_mac = None
+        self.connecting_name = None
         self.connected_device = None  # {"mac": ..., "name": ...}
         self.discovered_devices = []  # list of {"mac": ..., "name": ..., "rssi": ...}
         self._reconnect_task = None
@@ -212,10 +214,14 @@ class BluetoothManager:
     async def connect_device(self, mac, name=None, silent=False):
         """Pair, trust, and connect to a device by MAC address."""
         if self.is_connecting:
+            if not silent and self.tts:
+                await self.tts.speak("Verbindung läuft bereits.")
             return False
 
         self.is_connecting = True
+        self.connecting_mac = mac
         display_name = name or mac
+        self.connecting_name = display_name
         print(f"[Bluetooth] Connecting to {display_name} ({mac})...")
 
         if not self.is_linux:
@@ -228,6 +234,8 @@ class BluetoothManager:
             self.state.last_bt_device_name = display_name
             self.state.save()
             self.is_connecting = False
+            self.connecting_mac = None
+            self.connecting_name = None
             if self.tts and not silent:
                 await self.tts.speak(f"Bluetooth verbunden mit {display_name}.")
             return True
@@ -286,11 +294,15 @@ class BluetoothManager:
             print(f"[Bluetooth] Connection exception: {e}")
         finally:
             self.is_connecting = False
+            self.connecting_mac = None
+            self.connecting_name = None
 
         return success
 
     async def disconnect(self):
         """Disconnect active device."""
+        self.connecting_mac = None
+        self.connecting_name = None
         if not self.connected_device and not self.last_mac:
             return
 
@@ -410,6 +422,8 @@ class BluetoothManager:
         print("[Bluetooth] Starting Bluetooth subsystem reset...")
         self.is_scanning = False
         self.is_connecting = False
+        self.connecting_mac = None
+        self.connecting_name = None
         self.discovered_devices = []
 
         if not self.is_linux:
