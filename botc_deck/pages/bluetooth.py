@@ -9,9 +9,17 @@ class BluetoothPage(BasePage):
         super().__init__(app)
         self.device_slots = []  # Discovered devices mapped to keys 5..13
         self._sync_device_slots()
+        # Pre-load cached audio devices so they appear on keys immediately without scanning
+        if not self.device_slots:
+            asyncio.create_task(self._auto_load())
 
     def _sync_device_slots(self):
         self.device_slots = self.bluetooth.discovered_devices[:9]
+
+    async def _auto_load(self):
+        await self.bluetooth.load_cached_devices()
+        self._sync_device_slots()
+        await self.app.refresh_page()
 
     async def get_image(self, key_idx):
         r = self.renderer

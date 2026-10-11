@@ -54,6 +54,8 @@ class BluetoothManager:
             await self._ensure_preferred_controller()
             # Check currently connected device
             await self._refresh_connection_status()
+            # Pre-load known audio devices from BlueZ cache so they appear immediately in menu
+            await self.load_cached_devices()
             if self.connected_device:
                 await self._set_bluetooth_as_default_sink(self.connected_device["mac"])
             elif self.config.get("system", "auto_reconnect_bluetooth", default=True):
@@ -61,6 +63,44 @@ class BluetoothManager:
                     asyncio.create_task(self.connect_device(self.last_mac, self.last_name, silent=True))
         else:
             print("[Bluetooth] Non-Linux environment (macOS): Running in Mock Bluetooth mode.")
+
+    async def load_cached_devices(self):
+        """Pre-populate discovered_devices with known/paired audio devices from BlueZ cache."""
+        if not self.is_linux:
+            return self.discovered_devices
+
+        try:
+            p = await asyncio.create_subprocess_exec(
+                "bluetoothctl", "devices",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            stdout, _ = await p.communicate()
+            lines = stdout.decode("utf-8", errors="ignore").splitlines()
+
+            dev_map = {}
+            for l in lines:
+                clean_l = self._clean_bt_str(l)
+                m = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s*(.*)$", clean_l)
+                if m:
+                    mac, name = m.group(1), m.group(2).strip()
+                    if self._is_valid_device_name(name, mac):
+                        dev_map[mac] = name
+
+            scored_devices = []
+            for mac, name in dev_map.items():
+                is_audio, real_name = await self._check_is_audio_device(mac)
+                final_name = real_name or name
+                if is_audio:
+                    scored_devices.append({"mac": mac, "name": final_name, "is_audio": True})
+
+            if scored_devices:
+                self.discovered_devices = scored_devices
+                print(f"[Bluetooth] Pre-loaded {len(self.discovered_devices)} known audio devices: {self.discovered_devices}")
+        except Exception as e:
+            print(f"[Bluetooth] Error loading cached devices: {e}")
+
+        return self.discovered_devices
 
     async def _refresh_connection_status(self):
         if not self.is_linux or not shutil.which("bluetoothctl"):
