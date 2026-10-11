@@ -21,6 +21,7 @@ class BluetoothManager:
         self.is_connecting = False
         self.connecting_mac = None
         self.connecting_name = None
+        self.selected_controller_mac = None
         self.connected_device = None  # {"mac": ..., "name": ...}
         self.discovered_devices = []  # list of {"mac": ..., "name": ..., "rssi": ...}
         self._reconnect_task = None
@@ -40,12 +41,10 @@ class BluetoothManager:
                     "rfkill", "unblock", "bluetooth",
                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                 )
-                await asyncio.create_subprocess_exec(
-                    "bluetoothctl", "power", "on",
-                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                )
             except Exception:
                 pass
+            # Prioritize USB Bluetooth dongle over onboard Pi radio
+            await self._ensure_preferred_controller()
             # Check currently connected device
             await self._refresh_connection_status()
             if self.connected_device:
@@ -86,6 +85,89 @@ class BluetoothManager:
         except Exception as e:
             print(f"[Bluetooth] Refresh status error: {e}")
 
+    async def _ensure_preferred_controller(self):
+        """
+        If multiple Bluetooth controllers exist (e.g. onboard Pi + USB dongle),
+        detect them, prioritize the USB dongle, make it active via 'select',
+        and power off the onboard Pi radio to avoid dual-radio interference.
+        """
+        if not self.is_linux or not shutil.which("bluetoothctl"):
+            return None
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "bluetoothctl", "list",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            stdout, _ = await proc.communicate()
+            out = self._clean_bt_str(stdout.decode("utf-8", errors="ignore"))
+
+            controllers = []
+            for line in out.splitlines():
+                m = re.search(r"Controller\s+([0-9A-Fa-f:]{17})\s*(.*)", line)
+                if m:
+                    mac = m.group(1).upper()
+                    info = m.group(2).strip()
+                    controllers.append((mac, info))
+
+            if not controllers:
+                return None
+
+            if len(controllers) == 1:
+                self.selected_controller_mac = controllers[0][0]
+                return self.selected_controller_mac
+
+            # Multiple controllers detected!
+            # Raspberry Pi onboard MAC addresses start with B8:27:EB, DC:A6:32, E4:5F:01, 28:CD:C1, D8:3A:DD
+            pi_prefixes = ("B8:27:EB", "DC:A6:32", "E4:5F:01", "28:CD:C1", "D8:3A:DD")
+            usb_controller = None
+            internal_controller = None
+
+            for mac, info in controllers:
+                if any(mac.startswith(pfx) for pfx in pi_prefixes):
+                    internal_controller = mac
+                else:
+                    usb_controller = mac
+
+            chosen = usb_controller or controllers[0][0]
+            self.selected_controller_mac = chosen
+            print(f"[Bluetooth] Multiple controllers found! Prioritizing USB controller {chosen} over onboard {internal_controller}")
+
+            # 1. Power off onboard controller so it does not conflict/interfere with the USB dongle
+            if internal_controller and internal_controller != chosen:
+                print(f"[Bluetooth] Powering down onboard controller {internal_controller}...")
+                try:
+                    await asyncio.create_subprocess_exec(
+                        "bluetoothctl", "select", internal_controller,
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                    )
+                    await asyncio.create_subprocess_exec(
+                        "bluetoothctl", "power", "off",
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                    )
+                except Exception:
+                    pass
+
+            # 2. Select and power on USB controller
+            await asyncio.create_subprocess_exec(
+                "bluetoothctl", "select", chosen,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+            )
+            await asyncio.create_subprocess_exec(
+                "bluetoothctl", "power", "on",
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+            )
+            await asyncio.create_subprocess_exec(
+                "bluetoothctl", "default-agent",
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+            )
+
+            return chosen
+        except Exception as e:
+            print(f"[Bluetooth] Controller prioritization error: {e}")
+            return None
+
     async def start_scan(self, duration=12):
         """Scan for nearby Bluetooth audio devices."""
         if self.is_scanning:
@@ -110,11 +192,12 @@ class BluetoothManager:
 
         # Linux / BlueZ scan
         try:
-            # 0. Ensure Bluetooth adapter is unblocked and powered on
+            # 0. Ensure Bluetooth adapter is unblocked and preferred USB controller is active
             await asyncio.create_subprocess_exec(
                 "rfkill", "unblock", "bluetooth",
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
             )
+            await self._ensure_preferred_controller()
             await asyncio.create_subprocess_exec(
                 "bluetoothctl", "power", "on",
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
@@ -141,6 +224,8 @@ class BluetoothManager:
                 stderr=asyncio.subprocess.PIPE
             )
 
+            if self.selected_controller_mac:
+                proc.stdin.write(f"select {self.selected_controller_mac}\n".encode())
             proc.stdin.write(b"scan on\n")
             await proc.stdin.drain()
 
@@ -264,6 +349,13 @@ class BluetoothManager:
         # Linux bluetoothctl pairing / trust / connect
         success = False
         try:
+            await self._ensure_preferred_controller()
+            if self.selected_controller_mac:
+                await asyncio.create_subprocess_exec(
+                    "bluetoothctl", "select", self.selected_controller_mac,
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                )
+
             # 1. Trust
             await asyncio.create_subprocess_exec(
                 "bluetoothctl", "trust", mac,
@@ -382,8 +474,11 @@ class BluetoothManager:
                 stderr=asyncio.subprocess.PIPE
             )
 
-            # Register agent and issue pair command
-            commands = f"agent on\ndefault-agent\npair {mac}\n"
+            # Register agent and issue pair command on preferred controller
+            commands = ""
+            if self.selected_controller_mac:
+                commands += f"select {self.selected_controller_mac}\n"
+            commands += f"agent on\ndefault-agent\npair {mac}\n"
             proc.stdin.write(commands.encode("utf-8"))
             await proc.stdin.drain()
 
@@ -490,6 +585,7 @@ class BluetoothManager:
                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                 )
                 await asyncio.wait_for(p_on.wait(), timeout=3.0)
+                await self._ensure_preferred_controller()
                 await asyncio.create_subprocess_exec(
                     "bluetoothctl", "default-agent",
                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
