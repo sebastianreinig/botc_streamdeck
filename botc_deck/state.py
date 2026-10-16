@@ -7,13 +7,14 @@ class State:
         self.path = Path(state_file_path)
         self.day_position = 0.0
         self.night_position = 0.0
+        self.night_track_idx = 0
+        self.night_positions = [0.0, 0.0, 0.0]
         self.volume = 70
         self.brightness_idx = 0
         self.last_bt_device_mac = None
         self.last_bt_device_name = None
         self.active_mode = "day"  # Default is "day" (clean white text)
         self.load()
-
 
     def load(self):
         if self.path.exists():
@@ -22,6 +23,16 @@ class State:
                     data = json.load(f)
                     self.day_position = float(data.get("day_position", 0.0))
                     self.night_position = float(data.get("night_position", 0.0))
+                    self.night_track_idx = int(data.get("night_track_idx", 0))
+                    positions = data.get("night_positions")
+                    if isinstance(positions, list) and positions:
+                        self.night_positions = [float(p) for p in positions]
+                    else:
+                        self.night_positions = [self.night_position, 0.0, 0.0]
+                    while len(self.night_positions) < 3:
+                        self.night_positions.append(0.0)
+                    if self.night_track_idx < len(self.night_positions):
+                        self.night_position = self.night_positions[self.night_track_idx]
                     self.volume = int(data.get("volume", 70))
                     self.brightness_idx = int(data.get("brightness_idx", 0))
                     self.last_bt_device_mac = data.get("last_bt_device_mac")
@@ -29,7 +40,6 @@ class State:
                     # Game session always starts fresh in Day mode (white text)
                     self.active_mode = "day"
             except Exception as e:
-
                 print(f"[State] Error loading state: {e}")
 
     def save(self):
@@ -38,6 +48,8 @@ class State:
             data = {
                 "day_position": self.day_position,
                 "night_position": self.night_position,
+                "night_track_idx": self.night_track_idx,
+                "night_positions": self.night_positions,
                 "volume": self.volume,
                 "brightness_idx": self.brightness_idx,
                 "last_bt_device_mac": self.last_bt_device_mac,

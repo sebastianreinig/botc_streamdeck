@@ -17,7 +17,11 @@ class AudioEngine:
         self.fade_duration = float(config.get("audio", "fade_duration", default=1.5))
         self.volume_step = int(config.get("audio", "volume_step", default=5))
         self.day_file = config.resolve_path(config.get("paths", "day_track"))
-        self.night_file = config.resolve_path(config.get("paths", "night_track"))
+        night_tracks_cfg = config.get("paths", "night_tracks", default=None)
+        if night_tracks_cfg and isinstance(night_tracks_cfg, list):
+            self.night_files = [config.resolve_path(p) for p in night_tracks_cfg]
+        else:
+            self.night_files = [config.resolve_path(config.get("paths", "night_track"))]
         self.bell_file = config.resolve_path(config.get("paths", "bell_sound"))
 
         self.current_track = None  # "day", "night"
@@ -30,6 +34,16 @@ class AudioEngine:
         self.player_bell = None
         self.player_tts = None
         self._init_players()
+
+    def get_current_night_file(self):
+        if not self.night_files:
+            return ""
+        idx = self.state.night_track_idx % len(self.night_files)
+        return self.night_files[idx]
+
+    @property
+    def night_file(self):
+        return self.get_current_night_file()
 
     def _init_players(self):
         if HAS_PYTHON_MPV:
@@ -115,7 +129,11 @@ class AudioEngine:
         # 2. Switch track
         self.current_track = track_type
         self.state.active_mode = track_type
-        resume_pos = self.state.day_position if track_type == "day" else self.state.night_position
+        if track_type == "day":
+            resume_pos = self.state.day_position
+        else:
+            idx = self.state.night_track_idx % len(self.state.night_positions)
+            resume_pos = self.state.night_positions[idx]
 
         print(f"[Audio] Starting {track_type} ({os.path.basename(target_file)}) at pos {resume_pos:.1f}s, vol {self.state.volume}%")
 
@@ -145,6 +163,8 @@ class AudioEngine:
                 if self.current_track == "day":
                     self.state.day_position = float(pos)
                 elif self.current_track == "night":
+                    idx = self.state.night_track_idx % len(self.state.night_positions)
+                    self.state.night_positions[idx] = float(pos)
                     self.state.night_position = float(pos)
                 self.state.save()
         except Exception:
@@ -259,12 +279,16 @@ class AudioEngine:
             self.state.day_position = 0.0
             print("[Audio] Day position reset to 0:00.")
         elif track_type == "night":
+            idx = self.state.night_track_idx % len(self.state.night_positions)
+            self.state.night_positions[idx] = 0.0
             self.state.night_position = 0.0
-            print("[Audio] Night position reset to 0:00.")
+            print(f"[Audio] Night position for track {idx + 1} reset to 0:00.")
         else:
             self.state.day_position = 0.0
+            for i in range(len(self.state.night_positions)):
+                self.state.night_positions[i] = 0.0
             self.state.night_position = 0.0
-            print("[Audio] Both Day & Night positions reset to 0:00.")
+            print("[Audio] Both Day & all Night positions reset to 0:00.")
         self.state.save()
 
         # If the reset track is currently playing, reload it immediately from 0:00
@@ -277,6 +301,31 @@ class AudioEngine:
                     self.player_music.volume = self.state.volume
                 except Exception as e:
                     print(f"[Audio] Error reloading after reset: {e}")
+
+    async def cycle_night_track(self):
+        """Cycle to next night track alternative."""
+        if not self.night_files:
+            return 0
+        if self.current_track == "night" and self.is_playing:
+            self._save_current_position()
+
+        new_idx = (self.state.night_track_idx + 1) % len(self.night_files)
+        self.state.night_track_idx = new_idx
+        if new_idx < len(self.state.night_positions):
+            self.state.night_position = self.state.night_positions[new_idx]
+        self.state.save()
+
+        print(f"[Audio] Switched night track to #{new_idx + 1}: {os.path.basename(self.get_current_night_file())}")
+
+        # If night is currently playing, switch seamlessly to the newly selected track
+        if self.current_track == "night" and self.is_playing and not self.is_paused:
+            target_file = self.get_current_night_file()
+            if self._fade_task and not self._fade_task.done():
+                self._fade_task.cancel()
+            self._fade_task = asyncio.create_task(self._transition_to("night", target_file))
+            await self._fade_task
+
+        return new_idx
 
     def reinit_audio(self):
         """Re-initializes all mpv players in case of audio glitches or device switches."""

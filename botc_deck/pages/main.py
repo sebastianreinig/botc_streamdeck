@@ -67,8 +67,21 @@ class MainPage(BasePage):
                 icon_name="vol_up"
             )
 
-        # ---------------- Row 1: Timers & Cancel ----------------
-        timer_indices = {5: 10, 6: 8, 7: 5, 8: 3}
+        # ---------------- Row 1: Night-Mix, Timers & Cancel ----------------
+        if key_idx == 5:
+            # Night Track Selector
+            cur_idx = self.state.night_track_idx
+            total_tracks = len(self.audio.night_files) if hasattr(self.audio, "night_files") and self.audio.night_files else 3
+            is_night_active = (self.audio.current_track == "night" and self.audio.is_playing and not self.audio.is_paused)
+            return r.render_button(
+                label="Nacht-Mix",
+                sublabel=f"Track {cur_idx + 1}/{total_tracks}",
+                icon_name="moon",
+                is_active=is_night_active,
+                highlight_color=COLOR_NIGHT
+            )
+
+        timer_indices = {6: 8, 7: 5, 8: 3}
         if key_idx in timer_indices:
             mins = timer_indices[key_idx]
             is_this_timer = (self.timers.is_running and self.timers.active_minutes == mins)
@@ -175,8 +188,10 @@ class MainPage(BasePage):
             await self.app.refresh_key(4)
 
         elif key_idx == 5:
-            # 10 min
-            self.timers.start_timer(10)
+            # Switch night track alternative
+            new_idx = await self.audio.cycle_night_track()
+            if self.tts:
+                await self.tts.speak(f"Nachtmusik {new_idx + 1}")
             await self.app.refresh_page()
 
         elif key_idx == 6:
@@ -233,6 +248,14 @@ class MainPage(BasePage):
             if self.tts:
                 await self.tts.speak("Nacht auf Anfang.")
             await self.app.refresh_key(0)
+
+        elif key_idx == 5:
+            # Long press on Night-Mix -> Reset position of current night track to 0:00
+            print(f"[Main] Long press: Resetting Night track {self.state.night_track_idx + 1} to 0:00")
+            await self.audio.reset_positions("night")
+            if self.tts:
+                await self.tts.speak(f"Nachtmusik {self.state.night_track_idx + 1} auf Anfang.")
+            await self.app.refresh_key(5)
 
         elif key_idx == 1:
             # Long press on Day -> Reset day position to 0:00
