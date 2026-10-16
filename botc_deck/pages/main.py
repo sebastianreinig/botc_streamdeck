@@ -188,10 +188,8 @@ class MainPage(BasePage):
             await self.app.refresh_key(4)
 
         elif key_idx == 5:
-            # Switch night track alternative
-            new_idx = await self.audio.cycle_night_track()
-            if self.tts:
-                await self.tts.speak(f"Nachtmusik {new_idx + 1}")
+            # Switch night track alternative silently
+            await self.audio.cycle_night_track()
             await self.app.refresh_page()
 
         elif key_idx == 6:
