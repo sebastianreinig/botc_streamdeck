@@ -160,7 +160,7 @@ class BluetoothPage(BasePage):
 
         elif key_idx == 2:
             # Reconnect Last - instant visual cue
-            if bt.last_mac:
+            if bt.last_mac and not bt.is_connecting:
                 bt.is_connecting = True
                 bt.connecting_mac = bt.last_mac
                 bt.connecting_name = bt.last_name
@@ -179,7 +179,7 @@ class BluetoothPage(BasePage):
 
         elif 5 <= key_idx <= 13:
             slot_idx = key_idx - 5
-            if slot_idx < len(self.device_slots):
+            if slot_idx < len(self.device_slots) and not bt.is_connecting:
                 dev = self.device_slots[slot_idx]
                 mac = dev.get("mac")
                 name = dev.get("name")
@@ -195,5 +195,7 @@ class BluetoothPage(BasePage):
         await self.app.refresh_page()
 
     async def _do_connect(self, mac, name):
-        success = await self.bluetooth.connect_device(mac, name)
-        await self.app.refresh_page()
+        try:
+            await self.bluetooth.connect_device(mac, name)
+        finally:
+            await self.app.refresh_page()

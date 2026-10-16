@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 import platform
 import re
 import shutil
@@ -25,6 +26,7 @@ class BluetoothManager:
         self.connected_device = None  # {"mac": ..., "name": ...}
         self.discovered_devices = []  # list of {"mac": ..., "name": ..., "rssi": ...}
         self._reconnect_task = None
+        self._keepalive_proc = None
 
         if self.state.last_bt_device_mac:
             self.last_mac = self.state.last_bt_device_mac
@@ -58,11 +60,43 @@ class BluetoothManager:
             await self.load_cached_devices()
             if self.connected_device:
                 await self._set_bluetooth_as_default_sink(self.connected_device["mac"])
+                await self._start_audio_keepalive()
             elif self.config.get("system", "auto_reconnect_bluetooth", default=True):
                 if self.last_mac:
                     asyncio.create_task(self.connect_device(self.last_mac, self.last_name, silent=True))
         else:
             print("[Bluetooth] Non-Linux environment (macOS): Running in Mock Bluetooth mode.")
+
+    async def _run_bluetoothctl(self, commands, timeout=5.0):
+        """
+        Runs commands in an interactive bluetoothctl session with the selected controller.
+        Ensures commands target the USB/chosen controller even if BlueZ default is different.
+        """
+        if not self.is_linux or not shutil.which("bluetoothctl"):
+            return ""
+        try:
+            full_input = ""
+            if self.selected_controller_mac:
+                full_input += f"select {self.selected_controller_mac}\n"
+            full_input += commands
+            if not full_input.endswith("\n"):
+                full_input += "\n"
+            full_input += "quit\n"
+
+            proc = await asyncio.create_subprocess_exec(
+                "bluetoothctl",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            stdout, _ = await asyncio.wait_for(
+                proc.communicate(full_input.encode("utf-8")),
+                timeout=timeout
+            )
+            return self._clean_bt_str(stdout.decode("utf-8", errors="ignore"))
+        except Exception as e:
+            print(f"[Bluetooth] _run_bluetoothctl error: {e}")
+            return ""
 
     async def load_cached_devices(self):
         """Pre-populate discovered_devices with known/paired audio devices from BlueZ cache."""
@@ -70,13 +104,8 @@ class BluetoothManager:
             return self.discovered_devices
 
         try:
-            p = await asyncio.create_subprocess_exec(
-                "bluetoothctl", "devices",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL
-            )
-            stdout, _ = await p.communicate()
-            lines = stdout.decode("utf-8", errors="ignore").splitlines()
+            stdout_devices = await self._run_bluetoothctl("devices\ndevices Paired\n")
+            lines = stdout_devices.splitlines()
 
             dev_map = {}
             for l in lines:
@@ -85,6 +114,8 @@ class BluetoothManager:
                 if m:
                     mac, name = m.group(1), m.group(2).strip()
                     if self._is_valid_device_name(name, mac):
+                        dev_map[mac] = name
+                    elif mac not in dev_map:
                         dev_map[mac] = name
 
             scored_devices = []
@@ -107,13 +138,7 @@ class BluetoothManager:
             return
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "bluetoothctl", "info",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, _ = await proc.communicate()
-            out = stdout.decode("utf-8", errors="ignore")
+            out = await self._run_bluetoothctl("info")
             # If a device is connected: "Device AA:BB:CC:DD:EE:FF ... Connected: yes"
             if "Connected: yes" in out:
                 mac_match = re.search(r"Device\s+([0-9A-Fa-f:]{17})", out)
@@ -177,16 +202,26 @@ class BluetoothManager:
                 else:
                     usb_controller = mac
 
-            chosen = usb_controller or controllers[0][0]
-            self.selected_controller_mac = chosen
-            print(f"[Bluetooth] Multiple controllers found! Prioritizing USB controller {chosen} over onboard {internal_controller}")
+            prefer_usb = self.config.get("system", "prefer_usb_bluetooth", default=True)
+            if prefer_usb and usb_controller:
+                chosen = usb_controller
+                other = internal_controller
+            elif internal_controller:
+                chosen = internal_controller
+                other = usb_controller
+            else:
+                chosen = controllers[0][0]
+                other = None
 
-            # 1. Power off onboard controller so it does not conflict/interfere with the USB dongle
-            if internal_controller and internal_controller != chosen:
-                print(f"[Bluetooth] Powering down onboard controller {internal_controller}...")
+            self.selected_controller_mac = chosen
+            print(f"[Bluetooth] Multiple controllers found! Using controller {chosen} (inactive: {other})")
+
+            # 1. Power off inactive controller so it does not conflict/interfere
+            if other and other != chosen:
+                print(f"[Bluetooth] Powering down inactive controller {other}...")
                 try:
                     await asyncio.create_subprocess_exec(
-                        "bluetoothctl", "select", internal_controller,
+                        "bluetoothctl", "select", other,
                         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
                     )
                     await asyncio.create_subprocess_exec(
@@ -315,27 +350,21 @@ class BluetoothManager:
                 except Exception:
                     pass
 
-            # Also query all known and paired devices from BlueZ cache
-            for cmd in (["bluetoothctl", "devices"], ["bluetoothctl", "devices", "Paired"]):
-                try:
-                    p2 = await asyncio.create_subprocess_exec(
-                        *cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-                    stdout2, _ = await p2.communicate()
-                    lines = stdout2.decode("utf-8", errors="ignore").splitlines()
-                    for l in lines:
-                        clean_l = self._clean_bt_str(l)
-                        m = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s*(.*)$", clean_l)
-                        if m:
-                            mac, name = m.group(1), m.group(2).strip()
-                            if self._is_valid_device_name(name, mac):
-                                dev_map[mac] = name
-                            elif mac not in dev_map:
-                                dev_map[mac] = name or "Audio"
-                except Exception:
-                    pass
+            # Also query all known and paired devices from BlueZ cache on the selected controller
+            try:
+                stdout2 = await self._run_bluetoothctl("devices\ndevices Paired\n")
+                lines = stdout2.splitlines()
+                for l in lines:
+                    clean_l = self._clean_bt_str(l)
+                    m = re.match(r"^Device\s+([0-9A-Fa-f:]{17})\s*(.*)$", clean_l)
+                    if m:
+                        mac, name = m.group(1), m.group(2).strip()
+                        if self._is_valid_device_name(name, mac):
+                            dev_map[mac] = name
+                        elif mac not in dev_map:
+                            dev_map[mac] = name or "Audio"
+            except Exception:
+                pass
 
             # Prioritize devices by checking if they are audio sinks and resolve names
             scored_devices = []
@@ -363,7 +392,7 @@ class BluetoothManager:
 
     async def connect_device(self, mac, name=None, silent=False):
         """Pair, trust, and connect to a device by MAC address."""
-        if self.is_connecting:
+        if self.is_connecting and self.connecting_mac != mac:
             if not silent and self.tts:
                 await self.tts.speak("Verbindung läuft bereits.")
             return False
@@ -401,23 +430,22 @@ class BluetoothManager:
                 )
 
             # 1. Trust
-            await asyncio.create_subprocess_exec(
-                "bluetoothctl", "trust", mac,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL
-            )
-            # 2. Pair with automated PIN 0000 / confirmation support
-            await self._pair_with_pin_support(mac)
+            await self._run_bluetoothctl(f"trust {mac}")
 
-            # 3. Connect
-            p_conn = await asyncio.create_subprocess_exec(
-                "bluetoothctl", "connect", mac,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # 2. Pair with automated PIN 0000 only if not already paired
+            is_already_paired = False
+            try:
+                stdout_check = await self._run_bluetoothctl(f"info {mac}")
+                if "Paired: yes" in stdout_check:
+                    is_already_paired = True
+            except Exception:
+                pass
 
-            stdout, _ = await p_conn.communicate()
-            out = stdout.decode("utf-8", errors="ignore")
+            if not is_already_paired:
+                await self._pair_with_pin_support(mac)
+
+            # 3. Connect via interactive session
+            out = await self._run_bluetoothctl(f"connect {mac}", timeout=10.0)
 
             if "Connection successful" in out or "already connected" in out:
                 success = True
@@ -437,8 +465,22 @@ class BluetoothManager:
                 self.state.save()
                 print(f"[Bluetooth] Connected successfully to {display_name}!")
 
-                # Switch default audio sink to Bluetooth speaker in PipeWire
-                await self._set_bluetooth_as_default_sink(mac)
+                # Switch default audio sink to Bluetooth speaker in PipeWire (also forces volume > 0)
+                sink_ok = await self._set_bluetooth_as_default_sink(mac)
+                if not sink_ok:
+                    print("[Bluetooth] WARNING: Bluetooth audio sink did not appear in PipeWire.")
+
+                # Re-bind the long-lived mpv players to the new default sink.
+                # Old paused streams stay linked to the previous sink and can block the A2DP start.
+                audio = getattr(self.tts, "audio", None) if self.tts else None
+                if audio is not None:
+                    try:
+                        audio.reinit_audio()
+                    except Exception as e:
+                        print(f"[Bluetooth] Audio reinit failed: {e}")
+
+                # Start silent audio keepalive stream to prevent Bluetooth speaker standby/disconnect
+                await self._start_audio_keepalive()
 
                 if self.tts and not silent:
                     await self.tts.speak(f"Bluetooth verbunden mit {display_name}.")
@@ -466,6 +508,8 @@ class BluetoothManager:
         target = self.connected_device["mac"] if self.connected_device else self.last_mac
         print(f"[Bluetooth] Disconnecting {target}...")
 
+        await self._stop_audio_keepalive()
+
         if not self.is_linux:
             self.connected_device = None
             if self.tts:
@@ -473,11 +517,7 @@ class BluetoothManager:
             return
 
         try:
-            await asyncio.create_subprocess_exec(
-                "bluetoothctl", "disconnect", target,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL
-            )
+            await self._run_bluetoothctl(f"disconnect {target}")
             self.connected_device = None
             if self.tts:
                 await self.tts.speak("Bluetooth getrennt.")
@@ -489,11 +529,7 @@ class BluetoothManager:
         if self.last_mac:
             if self.is_linux:
                 try:
-                    await asyncio.create_subprocess_exec(
-                        "bluetoothctl", "remove", self.last_mac,
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.DEVNULL
-                    )
+                    await self._run_bluetoothctl(f"remove {self.last_mac}")
                 except Exception:
                     pass
             self.connected_device = None
@@ -685,13 +721,7 @@ class BluetoothManager:
         if not self.is_linux:
             return True, None
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "bluetoothctl", "info", mac,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL
-            )
-            stdout, _ = await proc.communicate()
-            out = self._clean_bt_str(stdout.decode("utf-8", errors="ignore"))
+            out = await self._run_bluetoothctl(f"info {mac}")
             out_lower = out.lower()
 
             resolved_name = None
@@ -724,7 +754,7 @@ class BluetoothManager:
         has_pactl = shutil.which("pactl") is not None
         has_wpctl = shutil.which("wpctl") is not None
 
-        for _ in range(6):
+        for _ in range(16):
             await asyncio.sleep(0.5)
             # 1. Try native PipeWire/WirePlumber wpctl
             if has_wpctl:
@@ -752,11 +782,18 @@ class BluetoothManager:
                                 if any(k in sink_name for k in ("bluez", "sound", "logitech", "speaker", "headset", "audio")):
                                     if "built-in" not in sink_name:
                                         print(f"[Bluetooth] Setting default sink via wpctl to ID {sink_id} ({sink_name})...")
-                                        await asyncio.create_subprocess_exec(
-                                            "wpctl", "set-default", sink_id,
-                                            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
-                                        )
-                                        return
+                                        for args in (
+                                            ("wpctl", "set-default", sink_id),
+                                            ("wpctl", "set-mute", sink_id, "0"),
+                                            # SoundCore reports AVRCP volume 0 on connect -> sink starts at 0.00 (silent)
+                                            ("wpctl", "set-volume", sink_id, "0.8"),
+                                        ):
+                                            p = await asyncio.create_subprocess_exec(
+                                                *args,
+                                                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+                                            )
+                                            await p.wait()
+                                        return True
                 except Exception as e:
                     print(f"[Bluetooth] wpctl error: {e}")
 
@@ -781,6 +818,47 @@ class BluetoothManager:
                                     stdout=asyncio.subprocess.DEVNULL,
                                     stderr=asyncio.subprocess.DEVNULL
                                 )
-                                return
+                                return True
                 except Exception as e:
                     print(f"[Bluetooth] pactl error: {e}")
+        return False
+
+    async def _start_audio_keepalive(self):
+        """
+        Runs a silent lavfi audio stream in background via PipeWire so the Bluetooth
+        speaker (e.g. Anker SoundCore) does not enter standby or disconnect due to idle.
+        """
+        if not self.is_linux:
+            return
+        await self._stop_audio_keepalive()
+        try:
+            silence_path = Path(__file__).parent.parent / "sounds" / "silence.wav"
+            # mpv playing silence wav file in an infinite loop
+            self._keepalive_proc = await asyncio.create_subprocess_exec(
+                "mpv",
+                "--no-video",
+                "--idle=no",
+                "--loop=inf",
+                "--ao=pipewire,pulse,alsa",
+                "--volume=1",
+                str(silence_path),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL
+            )
+            print("[Bluetooth] Started silent audio keepalive stream to maintain Bluetooth link.")
+        except Exception as e:
+            print(f"[Bluetooth] Failed to start audio keepalive: {e}")
+
+    async def _stop_audio_keepalive(self):
+        """Stops the audio keepalive stream if running."""
+        if self._keepalive_proc:
+            try:
+                self._keepalive_proc.terminate()
+                await asyncio.wait_for(self._keepalive_proc.wait(), timeout=1.0)
+            except Exception:
+                try:
+                    self._keepalive_proc.kill()
+                except Exception:
+                    pass
+            self._keepalive_proc = None
+            print("[Bluetooth] Stopped audio keepalive stream.")
