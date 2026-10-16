@@ -445,16 +445,7 @@ class BluetoothManager:
                 await self._pair_with_pin_support(mac)
 
             # 3. Connect via interactive session
-            out = await self._run_bluetoothctl(f"connect {mac}", timeout=10.0)
-
-            if "Connection successful" in out or "already connected" in out:
-                success = True
-            else:
-                # Double check with info
-                await asyncio.sleep(1.0)
-                await self._refresh_connection_status()
-                if self.connected_device and self.connected_device["mac"] == mac:
-                    success = True
+            success = await self._connect_interactive(mac, timeout=12.0)
 
             if success:
                 self.connected_device = {"mac": mac, "name": display_name}
@@ -540,6 +531,73 @@ class BluetoothManager:
             self.state.save()
             if self.tts:
                 await self.tts.speak("Gerät vergessen.")
+
+    async def _connect_interactive(self, mac, timeout=12.0):
+        """
+        Interactive connect session that waits for 'Connection successful' or confirms via info.
+        """
+        try:
+            # Check if device is already connected on the preferred controller
+            info_out = await self._run_bluetoothctl(f"info {mac}")
+            if "Connected: yes" in info_out:
+                print(f"[Bluetooth] Device {mac} is already connected.")
+                return True
+
+            proc = await asyncio.create_subprocess_exec(
+                "bluetoothctl",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            cmd = ""
+            if self.selected_controller_mac:
+                cmd += f"select {self.selected_controller_mac}\n"
+            cmd += f"connect {mac}\n"
+            proc.stdin.write(cmd.encode("utf-8"))
+            await proc.stdin.drain()
+
+            loop = asyncio.get_running_loop()
+            start_t = loop.time()
+            connected = False
+
+            while loop.time() - start_t < timeout:
+                try:
+                    line_bytes = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
+                    if not line_bytes:
+                        break
+                    line = line_bytes.decode("utf-8", errors="ignore")
+                    line_lower = line.lower()
+                    if "connection successful" in line_lower or "already connected" in line_lower:
+                        connected = True
+                        break
+                    if "failed to connect" in line_lower:
+                        print(f"[Bluetooth] Connect reported: {line.strip()}")
+                        break
+                except asyncio.TimeoutError:
+                    pass
+
+            try:
+                proc.stdin.write(b"quit\n")
+                await proc.stdin.drain()
+                proc.stdin.close()
+                await proc.wait()
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+            if not connected:
+                # Double check info if output was delayed
+                await asyncio.sleep(1.0)
+                info_check = await self._run_bluetoothctl(f"info {mac}")
+                if "Connected: yes" in info_check:
+                    connected = True
+
+            return connected
+        except Exception as e:
+            print(f"[Bluetooth] Interactive connect error: {e}")
+            return False
 
     async def _pair_with_pin_support(self, mac, timeout=12.0):
         """
